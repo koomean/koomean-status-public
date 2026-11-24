@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#edf3fb">
+  <meta name="theme-color" content="#f4f6fa">
   <meta name="description" content="ดูสถานะการใช้งานเว็บไซต์และบริการ Koo Mean พร้อมเหตุขัดข้องและกำหนดการซ่อมบำรุง">
   <title>สถานะบริการ | Koo Mean</title>
   <link rel="icon" href="./status-icon.png" type="image/png">
@@ -28,10 +28,7 @@
 
   <main id="main" class="wrap">
     <div class="intro">
-      <div>
-        <h1>สถานะบริการ</h1>
-        <p>ผลตรวจเว็บไซต์และบริการของ Koo Mean</p>
-      </div>
+      <h1>สถานะบริการ</h1>
       <button id="refresh" class="refresh-button" type="button">
         <span id="refresh-icon" class="refresh-icon" aria-hidden="true">↻</span>
         รีเฟรชสถานะ
@@ -40,11 +37,21 @@
 
     <section id="overview" class="overview" data-state="unknown" aria-labelledby="overall-title">
       <div class="overview-main">
-        <div class="signal-frame"><span id="overall-mark" class="signal-mark" aria-hidden="true">…</span></div>
         <div class="overview-copy">
-          <p class="overview-caption">ภาพรวมระบบ</p>
+          <div class="overview-signal">
+            <span id="overall-mark" class="signal-mark" aria-hidden="true">…</span>
+            <p id="overview-state">กำลังตรวจสอบ</p>
+          </div>
           <h2 id="overall-title">กำลังโหลดสถานะ</h2>
           <p id="overall-message">กำลังดึงผลตรวจล่าสุด</p>
+        </div>
+        <div id="overview-board" class="overview-board" hidden>
+          <div class="board-heading">
+            <span>บริการที่ทำงานปกติ</span>
+            <span id="board-count" class="board-count"></span>
+          </div>
+          <div id="board-segments" class="board-segments" aria-hidden="true"></div>
+          <ul id="board-legend" class="board-legend"></ul>
         </div>
       </div>
       <div class="overview-footer">
@@ -58,7 +65,7 @@
     <section id="services" class="section" aria-labelledby="services-heading">
       <div class="section-heading">
         <h2 id="services-heading">บริการทั้งหมด</h2>
-        <p>เลือกรายการเพื่อดูผลตรวจย้อนหลัง</p>
+        <p>เปิดบริการเพื่อดูผลตรวจย้อนหลัง 30 วัน</p>
       </div>
       <div id="service-groups">
         <p class="empty-state">กำลังโหลดรายการบริการ</p>

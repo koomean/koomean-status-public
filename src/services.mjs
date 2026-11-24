@@ -27,7 +27,7 @@ const components = [
   { id: 'shorturl', name: 'Short URL', group: 'Platform', description: 'ระบบบริการลิงก์สั้น', critical: true },
   { id: 'dashboard', name: 'Admin Dashboard', group: 'Platform', description: 'หน้าเข้าสู่ระบบของผู้ดูแล' },
   { id: 'api', name: 'Shared API', group: 'Platform', description: 'ข้อมูลแอปใน Portal และโพสต์ใน Blog', critical: true },
-  { id: 'synology', name: 'Synology Drive', group: 'Infrastructure', description: 'หน้าเข้าสู่ระบบ Synology Drive' },
+  { id: 'synology', name: 'Koo Mean Drive', group: 'Infrastructure', description: 'หน้าเข้าสู่ระบบ Koo Mean Drive', url: `${drive}/` },
 ];
 
 export const services = components.map((component) => ({

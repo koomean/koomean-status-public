@@ -9,7 +9,7 @@ const statusLabels = {
 };
 
 const overviewContent = {
-  operational: { title: "ทุกบริการทำงานปกติ", detail: "ผลตรวจล่าสุดของทุกบริการอยู่ในเกณฑ์ปกติ", mark: "✓" },
+  operational: { title: "ทุกบริการทำงานปกติ", detail: "ระบบตรวจอัตโนมัติทุก 5 นาที", mark: "✓" },
   degraded: { title: "บางบริการมีปัญหา", detail: "ดูบริการที่ได้รับผลกระทบและความคืบหน้าด้านล่าง", mark: "!" },
   outage: { title: "มีบริการที่ใช้งานไม่ได้", detail: "ดูบริการที่ได้รับผลกระทบและความคืบหน้าด้านล่าง", mark: "!" },
   maintenance: { title: "อยู่ระหว่างซ่อมบำรุง", detail: "ดูกำหนดการและบริการที่ได้รับผลกระทบด้านล่าง", mark: "◷" },
@@ -17,9 +17,9 @@ const overviewContent = {
 };
 
 const groupLabels = new Map([
-  ["Websites", { name: "เว็บไซต์", icon: "▤" }],
-  ["Platform", { name: "แพลตฟอร์ม", icon: "◇" }],
-  ["Infrastructure", { name: "โครงสร้างพื้นฐาน", icon: "▦" }],
+  ["Websites", { name: "เว็บไซต์", icon: "web" }],
+  ["Platform", { name: "แพลตฟอร์ม", icon: "platform" }],
+  ["Infrastructure", { name: "โครงสร้างพื้นฐาน", icon: "storage" }],
 ]);
 
 const incidentLabels = {
@@ -131,15 +131,38 @@ function historyStrip(days) {
   return group;
 }
 
+function serviceAddress(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 function serviceRow(service) {
   const detail = makeDetail("service", service.id, "service");
   detail.dataset.state = service.status;
   const headline = element("summary");
-  headline.append(element("span", "service-name", service.name), pill(service.status));
+  const address = serviceAddress(service.url);
+  const label = element("span", "service-label");
+  label.append(element("span", "service-name", service.name));
+  if (address) label.append(element("span", "service-host", address.hostname));
+  headline.append(label, pill(service.status));
   detail.append(headline);
 
   const content = element("div", "service-detail");
-  if (service.description) content.append(element("p", "", service.description));
+  if (service.description || address) {
+    const intro = element("div", "service-intro");
+    if (service.description) intro.append(element("p", "", service.description));
+    if (address) {
+      const link = element("a", "service-link", `เปิด ${service.name}`);
+      link.href = address.href;
+      intro.append(link);
+    }
+    content.append(intro);
+  }
   const meta = element("div", "service-meta");
   const checked = element("span", "", service.checkedAt && formatTime(service.checkedAt) ? "ตรวจล่าสุด " : "ยังไม่มีผลตรวจ");
   if (service.checkedAt && formatTime(service.checkedAt)) checked.append(timeNode(service.checkedAt));
@@ -173,19 +196,21 @@ function renderServices(services) {
     groups.get(key).push(service);
   }
 
-  const blocks = [];
+  const main = element("div", "group-stack");
+  const side = element("div", "group-stack");
   for (const [key, group] of groups) {
     if (!group.length) continue;
     const wrapper = element("section", "service-group");
     const heading = element("h3", "group-heading");
-    const { name, icon } = groupLabels.get(key) || { name: key, icon: "◇" };
-    const mark = element("span", "group-icon", icon);
+    const { name, icon } = groupLabels.get(key) || { name: key, icon: "platform" };
+    const mark = element("span", "group-icon");
+    mark.dataset.icon = icon;
     mark.setAttribute("aria-hidden", "true");
-    heading.append(mark, document.createTextNode(name));
+    heading.append(mark, document.createTextNode(name), element("span", "group-size", `${group.length} บริการ`));
     wrapper.append(heading, ...group.map(serviceRow));
-    blocks.push(wrapper);
+    (key === "Websites" ? main : side).append(wrapper);
   }
-  list.replaceChildren(...blocks);
+  list.replaceChildren(...[main, side].filter((column) => column.childElementCount));
   if (activeId && list.contains(get(activeId))) get(activeId).querySelector("summary")?.focus({ preventScroll: true });
 }
 
@@ -285,16 +310,45 @@ function maxAgeOf(data) {
   return (Number.isFinite(minutes) && minutes > 0 ? minutes : defaultStaleMinutes) * 60000;
 }
 
+function renderBoard(services) {
+  const board = get("overview-board");
+  board.hidden = !services.length;
+  if (!services.length) return;
+
+  const counts = new Map(Object.keys(statusLabels).map((state) => [state, 0]));
+  const segments = services.map(({ name, status }) => {
+    counts.set(status, counts.get(status) + 1);
+    const segment = element("span", "board-segment");
+    segment.dataset.state = status;
+    segment.title = `${name} · ${statusLabels[status]}`;
+    return segment;
+  });
+  get("board-segments").replaceChildren(...segments);
+
+  const count = get("board-count");
+  count.replaceChildren(element("strong", "", counts.get("operational")), document.createTextNode(` / ${services.length}`));
+  const legend = [...counts].filter(([, amount]) => amount > 0).map(([state, amount]) => {
+    const item = element("li", "", `${amount} ${statusLabels[state]}`);
+    item.dataset.state = state;
+    return item;
+  });
+  const statusLegend = get("board-legend");
+  statusLegend.hidden = counts.get("operational") === services.length;
+  statusLegend.replaceChildren(...legend);
+}
+
 function renderOverview(services, state, previous, fromMirror) {
   const presentation = overviewContent[state];
   get("overview").dataset.state = state;
   get("overall-mark").textContent = presentation.mark;
+  get("overview-state").textContent = statusLabels[state];
   get("overall-title").textContent = presentation.title;
   const detail = previous === "offline"
     ? "เชื่อมต่อข้อมูลล่าสุดไม่ได้ โปรดลองรีเฟรชสถานะอีกครั้ง"
     : previous === "stale" ? "ผลตรวจที่ได้รับเกินเวลาที่กำหนด ระบบกำลังรอข้อมูลใหม่"
     : state === "unknown" && services.some((service) => service.status === "operational")
-      ? "บริการที่ตรวจได้ทำงานปกติ ยังมีบางบริการที่รอการยืนยัน" : presentation.detail;
+      ? "บริการที่ตรวจได้ทำงานปกติ ยังมีบางบริการที่รอการยืนยัน"
+      : state === "operational" && fromMirror ? "ตัวตรวจภายนอกทำงานตามรอบทุก 10 นาที" : presentation.detail;
   get("overall-message").textContent = detail;
 
   const lastChecked = get("last-checked");
@@ -303,8 +357,9 @@ function renderOverview(services, state, previous, fromMirror) {
   lastChecked.replaceChildren(document.createTextNode(latest ? "ตรวจล่าสุด " : "ยังไม่มีเวลาตรวจ"));
   if (latest) lastChecked.append(timeNode(latest));
   const known = services.filter((service) => service.status !== "unknown").length;
-  const count = services.length ? `${known} จาก ${services.length} บริการมีสถานะยืนยัน` : "";
+  const count = known < services.length ? `ยืนยันแล้ว ${known} จาก ${services.length} บริการ` : "";
   get("overview-count").textContent = [count, fromMirror ? "ข้อมูลสำรอง" : ""].filter(Boolean).join(" · ");
+  renderBoard(services);
 
   const announcement = `${presentation.title} ${detail}`;
   if (announcement !== lastAnnouncement) get("announcement").textContent = announcement;
