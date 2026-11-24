@@ -7,31 +7,59 @@
   <meta name="description" content="ดูสถานะการใช้งานเว็บไซต์และบริการ Koo Mean พร้อมเหตุขัดข้องและกำหนดการซ่อมบำรุง">
   <title>สถานะบริการ | Koo Mean</title>
   <link rel="icon" href="./status-icon.png" type="image/png">
+  <script src="./status-preferences.js"></script>
   <link rel="stylesheet" href="./styles.css">
+  <script src="./status-i18n.js" defer></script>
   <script src="./status.js" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">ข้ามไปยังสถานะบริการ</a>
+  <a class="skip-link" href="#main" data-i18n="skip">ข้ามไปยังสถานะบริการ</a>
   <header class="site-header">
     <div class="wrap header-inner">
-      <a class="brand" href="./" aria-label="หน้าหลัก Koo Mean Status">
+      <a class="brand" href="./" aria-label="หน้าหลัก Koo Mean Status" data-i18n-label="brand">
         <span class="brand-mark" aria-hidden="true">K</span>
         <span>Koo Mean <span class="brand-detail">Status</span></span>
       </a>
-      <nav class="site-nav" aria-label="ส่วนต่าง ๆ ในหน้านี้">
-        <a href="#services">บริการ</a>
-        <a href="#incidents">เหตุขัดข้อง</a>
+      <nav class="site-nav" aria-label="ส่วนต่าง ๆ ในหน้านี้" data-i18n-label="nav">
+        <a href="#services" data-i18n="servicesNav">บริการ</a>
+        <a href="#incidents" data-i18n="incidentsNav">เหตุขัดข้อง</a>
       </nav>
-      <a class="portal-link" href="https://koomean.com/">ไปที่ Portal</a>
+      <div class="header-actions">
+        <a class="portal-link" href="https://koomean.com/" data-i18n="portal">ไปที่ Portal</a>
+        <details id="preferences" class="preferences" hidden>
+          <summary aria-label="การแสดงผล" data-i18n-label="preferences">
+            <span class="settings-icon" aria-hidden="true">⚙</span>
+            <span class="settings-label" data-i18n="preferences">การแสดงผล</span>
+          </summary>
+          <div class="preferences-panel">
+            <label class="preference-field">
+              <span data-i18n="theme">ธีม</span>
+              <select id="theme-select">
+                <option value="system" data-i18n="system">ตามการตั้งค่าของเครื่อง</option>
+                <option value="light" data-i18n="light">สว่าง</option>
+                <option value="dark" data-i18n="dark">มืด</option>
+              </select>
+            </label>
+            <label class="preference-field">
+              <span data-i18n="language">ภาษา</span>
+              <select id="language-select">
+                <option value="system" data-i18n="system">ตามการตั้งค่าของเครื่อง</option>
+                <option value="th" lang="th">ไทย</option>
+                <option value="en" lang="en">English</option>
+              </select>
+            </label>
+          </div>
+        </details>
+      </div>
     </div>
   </header>
 
   <main id="main" class="wrap">
     <div class="intro">
-      <h1>สถานะบริการ</h1>
+      <h1 data-i18n="pageHeading">สถานะบริการ</h1>
       <button id="refresh" class="refresh-button" type="button">
         <span id="refresh-icon" class="refresh-icon" aria-hidden="true">↻</span>
-        รีเฟรชสถานะ
+        <span data-i18n="refresh">รีเฟรชสถานะ</span>
       </button>
     </div>
 
@@ -40,14 +68,14 @@
         <div class="overview-copy">
           <div class="overview-signal">
             <span id="overall-mark" class="signal-mark" aria-hidden="true">…</span>
-            <p id="overview-state">กำลังตรวจสอบ</p>
+            <p id="overview-state" data-i18n="checking">กำลังตรวจสอบ</p>
           </div>
-          <h2 id="overall-title">กำลังโหลดสถานะ</h2>
-          <p id="overall-message">กำลังดึงผลตรวจล่าสุด</p>
+          <h2 id="overall-title" data-i18n="loadingStatus">กำลังโหลดสถานะ</h2>
+          <p id="overall-message" data-i18n="loadingResults">กำลังดึงผลตรวจล่าสุด</p>
         </div>
         <div id="overview-board" class="overview-board" hidden>
           <div class="board-heading">
-            <span>บริการที่ทำงานปกติ</span>
+            <span data-i18n="workingServices">บริการที่ทำงานปกติ</span>
             <span id="board-count" class="board-count"></span>
           </div>
           <div id="board-segments" class="board-segments" aria-hidden="true"></div>
@@ -55,38 +83,38 @@
         </div>
       </div>
       <div class="overview-footer">
-        <p id="last-checked">กำลังโหลดเวลา</p>
+        <p id="last-checked" data-i18n="loadingTime">กำลังโหลดเวลา</p>
         <p id="overview-count"></p>
       </div>
     </section>
     <p id="announcement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
-    <noscript><p class="empty-state">เปิดใช้ JavaScript เพื่อดูผลตรวจและประกาศล่าสุด</p></noscript>
+    <noscript><p class="empty-state">เปิดใช้ JavaScript เพื่อดูผลตรวจและประกาศล่าสุด / <span lang="en">Enable JavaScript to view status and updates.</span></p></noscript>
 
     <section id="services" class="section" aria-labelledby="services-heading">
       <div class="section-heading">
-        <h2 id="services-heading">บริการทั้งหมด</h2>
-        <p>เปิดบริการเพื่อดูผลตรวจย้อนหลัง 30 วัน</p>
+        <h2 id="services-heading" data-i18n="servicesHeading">บริการทั้งหมด</h2>
+        <p data-i18n="servicesHint">เลือกชื่อบริการเพื่อเปิดเว็บ หรือกดปุ่มด้านขวาเพื่อดูประวัติ</p>
       </div>
       <div id="service-groups">
-        <p class="empty-state">กำลังโหลดรายการบริการ</p>
+        <p class="empty-state" data-i18n="loadingServices">กำลังโหลดรายการบริการ</p>
       </div>
     </section>
 
     <div class="updates-layout">
       <section id="incidents" class="section" aria-labelledby="incidents-heading">
         <div class="section-heading">
-          <h2 id="incidents-heading">เหตุขัดข้อง</h2>
+          <h2 id="incidents-heading" data-i18n="incidentsHeading">เหตุขัดข้อง</h2>
         </div>
         <div id="incident-list">
-          <p class="empty-state">กำลังโหลดเหตุขัดข้อง</p>
+          <p class="empty-state" data-i18n="loadingIncidents">กำลังโหลดเหตุขัดข้อง</p>
         </div>
       </section>
       <section id="maintenance" class="section" aria-labelledby="maintenance-heading">
         <div class="section-heading">
-          <h2 id="maintenance-heading">กำหนดการซ่อมบำรุง</h2>
+          <h2 id="maintenance-heading" data-i18n="maintenanceHeading">กำหนดการซ่อมบำรุง</h2>
         </div>
         <div id="maintenance-list">
-          <p class="empty-state">กำลังโหลดกำหนดการ</p>
+          <p class="empty-state" data-i18n="loadingMaintenance">กำลังโหลดกำหนดการ</p>
         </div>
       </section>
     </div>
@@ -95,8 +123,8 @@
   <footer class="site-footer">
     <div class="wrap footer-inner">
       <a href="./" class="footer-name">Koo Mean Status</a>
-      <a href="https://koomean.github.io/koomean-status-public/" id="backup-link">หน้าสถานะสำรอง</a>
-      <p>เวลาในหน้านี้แสดงตามเวลาไทย (UTC+7)</p>
+      <a href="https://koomean.github.io/koomean-status-public/" id="backup-link" data-i18n="backupPage">หน้าสถานะสำรอง</a>
+      <p data-i18n="timezone">เวลาในหน้านี้แสดงตามเวลาไทย (UTC+7)</p>
     </div>
   </footer>
 </body>

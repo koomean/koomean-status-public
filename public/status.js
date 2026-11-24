@@ -1,52 +1,72 @@
 "use strict";
 
-const statusLabels = {
-  operational: "ปกติ",
-  degraded: "มีปัญหาบางส่วน",
-  outage: "ใช้งานไม่ได้",
-  maintenance: "ซ่อมบำรุง",
-  unknown: "ยังยืนยันไม่ได้",
-};
-
-const overviewContent = {
-  operational: { title: "ทุกบริการทำงานปกติ", detail: "ระบบตรวจอัตโนมัติทุก 5 นาที", mark: "✓" },
-  degraded: { title: "บางบริการมีปัญหา", detail: "ดูบริการที่ได้รับผลกระทบและความคืบหน้าด้านล่าง", mark: "!" },
-  outage: { title: "มีบริการที่ใช้งานไม่ได้", detail: "ดูบริการที่ได้รับผลกระทบและความคืบหน้าด้านล่าง", mark: "!" },
-  maintenance: { title: "อยู่ระหว่างซ่อมบำรุง", detail: "ดูกำหนดการและบริการที่ได้รับผลกระทบด้านล่าง", mark: "◷" },
-  unknown: { title: "ยังยืนยันสถานะไม่ได้", detail: "บางบริการยังไม่มีผลตรวจล่าสุด", mark: "?" },
-};
-
-const groupLabels = new Map([
-  ["Websites", { name: "เว็บไซต์", icon: "web" }],
-  ["Platform", { name: "แพลตฟอร์ม", icon: "platform" }],
-  ["Infrastructure", { name: "โครงสร้างพื้นฐาน", icon: "storage" }],
-]);
-
-const incidentLabels = {
-  investigating: { label: "กำลังตรวจสอบ", tone: "degraded" },
-  identified: { label: "พบสาเหตุแล้ว", tone: "degraded" },
-  monitoring: { label: "เฝ้าติดตาม", tone: "maintenance" },
-  resolved: { label: "แก้ไขแล้ว", tone: "operational" },
-};
-
+const overviewMarks = { operational: "✓", degraded: "!", outage: "!", maintenance: "◷", unknown: "?" };
+const groupIcons = new Map([["Websites", "web"], ["Platform", "platform"], ["Infrastructure", "storage"]]);
+const incidentTones = { investigating: "degraded", identified: "degraded", monitoring: "maintenance", resolved: "operational" };
 const defaultStaleMinutes = 15;
-const timeFormat = new Intl.DateTimeFormat("th-TH-u-ca-gregory", {
-  dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok",
-});
-const dayFormat = new Intl.DateTimeFormat("th-TH-u-ca-gregory", {
-  day: "numeric", month: "short", timeZone: "Asia/Bangkok",
-});
-
+const timeZone = "Asia/Bangkok";
 const get = (id) => document.getElementById(id);
+const i18n = globalThis.statusI18n;
+const preferences = globalThis.statusPreferences;
 const refresh = get("refresh");
 const backupLink = get("backup-link");
-if (backupLink && backupLink.origin === window.location.origin) {
+if (backupLink.origin === window.location.origin) {
   backupLink.href = "https://status.koomean.com/";
-  backupLink.textContent = "หน้าสถานะหลัก";
+  backupLink.dataset.i18n = "primaryPage";
 }
+
+let language;
+let timeFormat;
+let dayFormat;
+let percentFormat;
+let lastRender;
 let lastSnapshot;
 let loading = false;
 let lastAnnouncement = "";
+
+const t = (key, vars) => i18n.text(language, key, vars);
+const plural = (key, count, vars) => i18n.plural(language, key, count, vars);
+const statusLabel = (state) => t(`status.${state}`);
+
+function applyLanguage() {
+  const choice = preferences.get("language");
+  const next = choice === "system"
+    ? i18n.systemLanguage(navigator.languages?.length ? navigator.languages : [navigator.language]) : choice;
+  if (language === next) return;
+  language = next;
+  const locale = i18n.locale(language);
+  timeFormat = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone });
+  dayFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone });
+  percentFormat = new Intl.NumberFormat(locale, { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  document.documentElement.lang = language;
+  document.title = t("title");
+  document.querySelector('meta[name="description"]').content = t("description");
+  for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
+  for (const node of document.querySelectorAll("[data-i18n-label]")) node.setAttribute("aria-label", t(node.dataset.i18nLabel));
+  if (lastRender) render(...lastRender);
+}
+
+function setupPreferences() {
+  const menu = get("preferences");
+  for (const key of ["theme", "language"]) {
+    const select = get(`${key}-select`);
+    select.value = preferences.get(key);
+    select.addEventListener("change", () => {
+      preferences.set(key, select.value);
+      if (key === "language") applyLanguage();
+    });
+  }
+  document.addEventListener("click", (event) => {
+    if (menu.open && !menu.contains(event.target)) menu.open = false;
+  });
+  menu.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !menu.open) return;
+    menu.open = false;
+    menu.querySelector("summary").focus();
+  });
+  window.addEventListener("languagechange", applyLanguage);
+  menu.hidden = false;
+}
 
 function element(tag, className, content) {
   const node = document.createElement(tag);
@@ -71,10 +91,10 @@ function timeNode(value) {
 }
 
 function rowStatus(value) {
-  return Object.hasOwn(statusLabels, value) ? value : "unknown";
+  return Object.hasOwn(overviewMarks, value) ? value : "unknown";
 }
 
-function pill(state, label = statusLabels[state]) {
+function pill(state, label = statusLabel(state)) {
   const badge = element("span", "pill", label);
   badge.dataset.state = state;
   return badge;
@@ -104,8 +124,8 @@ function historyStrip(days) {
 
   const group = element("div", "history");
   const heading = element("div", "history-heading");
-  heading.append(element("span", "", "ผลตรวจรายวัน"));
-  if (sorted.length > 1) heading.append(element("span", "", `${sorted.length} วัน`));
+  heading.append(element("span", "", t("dailyResults")));
+  if (sorted.length > 1) heading.append(element("span", "", plural("dayCount", sorted.length)));
   group.append(heading);
 
   const bars = element("div", "history-bars");
@@ -115,13 +135,13 @@ function historyStrip(days) {
     const dayLabel = dayFormat.format(dateMs(day.date));
     const bar = element("span");
     bar.dataset.state = state;
-    bar.title = `${dayLabel} · ${statusLabels[state]}`;
+    bar.title = `${dayLabel} · ${statusLabel(state)}`;
     bar.setAttribute("aria-hidden", "true");
     bars.append(bar);
     dayCounts[state] = (dayCounts[state] || 0) + 1;
   }
 
-  const summary = Object.entries(dayCounts).map(([state, count]) => `${statusLabels[state]} ${count} วัน`).join(", ");
+  const summary = Object.entries(dayCounts).map(([state, count]) => plural("statusDays", count, { status: statusLabel(state) })).join(", ");
   group.append(element("span", "visually-hidden", summary), bars);
 
   const range = element("div", "history-range");
@@ -142,56 +162,65 @@ function serviceAddress(value) {
 }
 
 function serviceRow(service) {
-  const detail = makeDetail("service", service.id, "service");
-  detail.dataset.state = service.status;
-  const headline = element("summary");
+  const row = element("article", "service");
+  row.id = `service-${service.id}`;
+  row.dataset.state = service.status;
+  const wasOpen = get(row.id)?.querySelector(".service-toggle")?.getAttribute("aria-expanded") === "true";
+  const headline = element("div", "service-row");
   const address = serviceAddress(service.url);
-  const label = element("span", "service-label");
+  const label = element(address ? "a" : "span", "service-label");
+  if (address) label.href = address.href;
   label.append(element("span", "service-name", service.name));
-  if (address) label.append(element("span", "service-host", address.hostname));
-  headline.append(label, pill(service.status));
-  detail.append(headline);
+  if (address && service.id === "synology") label.append(element("span", "service-host", address.hostname));
 
   const content = element("div", "service-detail");
-  if (service.description || address) {
-    const intro = element("div", "service-intro");
-    if (service.description) intro.append(element("p", "", service.description));
-    if (address) {
-      const link = element("a", "service-link", `เปิด ${service.name}`);
-      link.href = address.href;
-      intro.append(link);
-    }
-    content.append(intro);
-  }
+  content.id = `${row.id}-history`;
+  const toggle = element("button", "service-toggle");
+  toggle.type = "button";
+  toggle.setAttribute("aria-label", t("historyFor", { name: service.name }));
+  toggle.setAttribute("aria-controls", content.id);
+  toggle.title = t("viewHistory");
+  const showHistory = (open) => {
+    toggle.setAttribute("aria-expanded", String(open));
+    content.hidden = !open;
+    row.classList.toggle("history-open", open);
+  };
+  toggle.addEventListener("click", () => showHistory(content.hidden));
+  showHistory(wasOpen);
+  headline.append(label, pill(service.status), toggle);
+  row.append(headline);
+
+  const description = language === "en" ? service.descriptionEn : service.description;
+  if (description) content.append(element("p", "", description));
   const meta = element("div", "service-meta");
-  const checked = element("span", "", service.checkedAt && formatTime(service.checkedAt) ? "ตรวจล่าสุด " : "ยังไม่มีผลตรวจ");
-  if (service.checkedAt && formatTime(service.checkedAt)) checked.append(timeNode(service.checkedAt));
+  const hasCheck = Number.isFinite(dateMs(service.checkedAt));
+  const checked = element("span", "", hasCheck ? `${t("lastChecked")} ` : t("noResults"));
+  if (hasCheck) checked.append(timeNode(service.checkedAt));
   meta.append(checked);
 
   if (Number.isFinite(service.uptime)) {
-    const uptime = element("span", "", "ผลตรวจผ่าน ");
-    uptime.append(element("strong", "", `${service.uptime.toFixed(2)}%`));
+    const uptime = element("span", "", `${t("successfulChecks")} `);
+    uptime.append(element("strong", "", percentFormat.format(service.uptime / 100)));
     meta.append(uptime);
   }
-  content.append(meta);
-
-  const history = historyStrip(service.days);
-  content.append(history || element("p", "", "ยังไม่มีประวัติผลตรวจรายวัน"));
-  detail.append(content);
-  return detail;
+  content.append(meta, historyStrip(service.days) || element("p", "", t("noDailyHistory")));
+  row.append(content);
+  return row;
 }
 
 function renderServices(services) {
   const list = get("service-groups");
-  const activeId = document.activeElement?.closest("details[id]")?.id;
+  const focused = document.activeElement;
+  const activeId = focused?.closest(".service")?.id;
+  const focusSelector = focused?.classList.contains("service-toggle") ? ".service-toggle" : "a.service-label";
   if (!services.length) {
-    list.replaceChildren(empty("ยังโหลดรายการบริการไม่ได้ โปรดลองรีเฟรชสถานะ"));
+    list.replaceChildren(empty(t("noServices")));
     return;
   }
 
-  const groups = new Map([...groupLabels].map(([key]) => [key, []]));
+  const groups = new Map([...groupIcons.keys()].map((key) => [key, []]));
   for (const service of services) {
-    const key = service.group || "บริการอื่น ๆ";
+    const key = groupIcons.has(service.group) ? service.group : "Other";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(service);
   }
@@ -202,16 +231,17 @@ function renderServices(services) {
     if (!group.length) continue;
     const wrapper = element("section", "service-group");
     const heading = element("h3", "group-heading");
-    const { name, icon } = groupLabels.get(key) || { name: key, icon: "platform" };
+    const icon = groupIcons.get(key) ?? "platform";
+    const name = t(key === "Other" ? "otherServices" : `group.${key}`);
     const mark = element("span", "group-icon");
     mark.dataset.icon = icon;
     mark.setAttribute("aria-hidden", "true");
-    heading.append(mark, document.createTextNode(name), element("span", "group-size", `${group.length} บริการ`));
+    heading.append(mark, document.createTextNode(name), element("span", "group-size", plural("serviceCount", group.length)));
     wrapper.append(heading, ...group.map(serviceRow));
     (key === "Websites" ? main : side).append(wrapper);
   }
   list.replaceChildren(...[main, side].filter((column) => column.childElementCount));
-  if (activeId && list.contains(get(activeId))) get(activeId).querySelector("summary")?.focus({ preventScroll: true });
+  if (activeId) get(activeId)?.querySelector(focusSelector)?.focus({ preventScroll: true });
 }
 
 function addAffected(body, ids, names) {
@@ -225,7 +255,7 @@ function eventUpdates(items) {
   const list = element("ol", "event-updates");
   for (const update of updates) {
     const row = element("li");
-    const state = incidentLabels[update.status]?.label;
+    const state = Object.hasOwn(incidentTones, update.status) ? t(`incident.${update.status}`) : "";
     const heading = element("p", "update-heading", state ? `${state} ` : "");
     heading.append(timeNode(update.createdAt));
     row.append(heading, element("p", "detail-copy", update.body));
@@ -235,10 +265,11 @@ function eventUpdates(items) {
 }
 
 function incidentCard(incident, names) {
-  const { tone, label } = incidentLabels[incident.status] || { tone: "unknown", label: "ยังยืนยันไม่ได้" };
+  const tone = Object.hasOwn(incidentTones, incident.status) ? incidentTones[incident.status] : "unknown";
+  const label = tone === "unknown" ? statusLabel(tone) : t(`incident.${incident.status}`);
   const details = makeDetail("incident", incident.id, "event-card incident", incident.status !== "resolved");
   const summary = element("summary");
-  const timing = element("span", "event-time", incident.status === "resolved" && incident.resolvedAt ? "แก้ไขเมื่อ " : "เริ่มเมื่อ ");
+  const timing = element("span", "event-time", `${t(incident.status === "resolved" && incident.resolvedAt ? "resolvedAt" : "startedAt")} `);
   timing.append(timeNode(incident.resolvedAt || incident.startedAt));
   summary.append(element("span", "event-title", incident.title), pill(tone, label), timing);
   const body = element("div", "event-body");
@@ -254,7 +285,7 @@ function renderIncidents(incidents, names, current) {
   const container = get("incident-list");
   const activeId = document.activeElement?.closest("details[id]")?.id;
   if (!incidents.length) {
-    container.replaceChildren(empty(current ? "ไม่มีรายงานเหตุขัดข้อง" : "ยังโหลดรายงานเหตุขัดข้องล่าสุดไม่ได้"));
+    container.replaceChildren(empty(t(current ? "noIncidents" : "incidentsUnavailable")));
     return;
   }
 
@@ -265,7 +296,7 @@ function renderIncidents(incidents, names, current) {
   for (const item of ordered) {
     list.append(incidentCard(item, names));
   }
-  const previous = current ? [] : [empty("แสดงประกาศจากข้อมูลที่บันทึกไว้ล่าสุด")];
+  const previous = current ? [] : [empty(t("savedIncidents"))];
   container.replaceChildren(...previous, list);
   if (activeId && container.contains(get(activeId))) get(activeId).querySelector("summary")?.focus({ preventScroll: true });
 }
@@ -279,7 +310,7 @@ function plannedMaintenance(items, now) {
 function renderMaintenance(windows, names, current, now) {
   const container = get("maintenance-list");
   if (!windows.length) {
-    container.replaceChildren(empty(current ? "ไม่มีซ่อมบำรุงตามกำหนดการ" : "ยังโหลดกำหนดการล่าสุดไม่ได้"));
+    container.replaceChildren(empty(t(current ? "noMaintenance" : "maintenanceUnavailable")));
     return;
   }
   const list = element("div", "maintenance-list");
@@ -287,16 +318,16 @@ function renderMaintenance(windows, names, current, now) {
     const card = element("article", "event-card");
     const heading = element("div", "maintenance-heading");
     const underway = current && dateMs(item.startsAt) <= now;
-    heading.append(element("h3", "event-title", item.title), pill("maintenance", underway ? "กำลังซ่อมบำรุง" : "ตามกำหนดการ"));
+    heading.append(element("h3", "event-title", item.title), pill("maintenance", t(underway ? "maintenanceUnderway" : "scheduled")));
     const window = element("p", "event-time");
-    window.append(timeNode(item.startsAt), document.createTextNode(" ถึง "), timeNode(item.endsAt));
+    window.append(timeNode(item.startsAt), document.createTextNode(` ${t("until")} `), timeNode(item.endsAt));
     const body = element("div", "event-body");
     addAffected(body, item.components, names);
     if (item.body) body.append(element("p", "detail-copy", item.body));
     card.append(heading, window, body);
     list.append(card);
   }
-  const previous = current ? [] : [empty("แสดงกำหนดการจากข้อมูลที่บันทึกไว้ล่าสุด")];
+  const previous = current ? [] : [empty(t("savedMaintenance"))];
   container.replaceChildren(...previous, list);
 }
 
@@ -315,12 +346,12 @@ function renderBoard(services) {
   board.hidden = !services.length;
   if (!services.length) return;
 
-  const counts = new Map(Object.keys(statusLabels).map((state) => [state, 0]));
+  const counts = new Map(Object.keys(overviewMarks).map((state) => [state, 0]));
   const segments = services.map(({ name, status }) => {
     counts.set(status, counts.get(status) + 1);
     const segment = element("span", "board-segment");
     segment.dataset.state = status;
-    segment.title = `${name} · ${statusLabels[status]}`;
+    segment.title = `${name} · ${statusLabel(status)}`;
     return segment;
   });
   get("board-segments").replaceChildren(...segments);
@@ -328,7 +359,7 @@ function renderBoard(services) {
   const count = get("board-count");
   count.replaceChildren(element("strong", "", counts.get("operational")), document.createTextNode(` / ${services.length}`));
   const legend = [...counts].filter(([, amount]) => amount > 0).map(([state, amount]) => {
-    const item = element("li", "", `${amount} ${statusLabels[state]}`);
+    const item = element("li", "", t("legendCount", { count: amount, status: statusLabel(state) }));
     item.dataset.state = state;
     return item;
   });
@@ -338,35 +369,34 @@ function renderBoard(services) {
 }
 
 function renderOverview(services, state, previous, fromMirror) {
-  const presentation = overviewContent[state];
+  const title = t(`overview.${state}.title`);
   get("overview").dataset.state = state;
-  get("overall-mark").textContent = presentation.mark;
-  get("overview-state").textContent = statusLabels[state];
-  get("overall-title").textContent = presentation.title;
-  const detail = previous === "offline"
-    ? "เชื่อมต่อข้อมูลล่าสุดไม่ได้ โปรดลองรีเฟรชสถานะอีกครั้ง"
-    : previous === "stale" ? "ผลตรวจที่ได้รับเกินเวลาที่กำหนด ระบบกำลังรอข้อมูลใหม่"
-    : state === "unknown" && services.some((service) => service.status === "operational")
-      ? "บริการที่ตรวจได้ทำงานปกติ ยังมีบางบริการที่รอการยืนยัน"
-      : state === "operational" && fromMirror ? "ตัวตรวจภายนอกทำงานตามรอบทุก 10 นาที" : presentation.detail;
+  get("overall-mark").textContent = overviewMarks[state];
+  get("overview-state").textContent = statusLabel(state);
+  get("overall-title").textContent = title;
+  let detail = t(`overview.${state}.detail`);
+  if (previous) detail = t(previous);
+  else if (state === "unknown" && services.some((service) => service.status === "operational")) detail = t("partialUnknown");
+  else if (state === "operational" && fromMirror) detail = t("overallOperationalMirror");
   get("overall-message").textContent = detail;
 
   const lastChecked = get("last-checked");
   const timestamps = services.map((service) => service.checkedAt).filter((value) => Number.isFinite(dateMs(value)));
   const latest = timestamps.sort((first, second) => dateMs(second) - dateMs(first))[0];
-  lastChecked.replaceChildren(document.createTextNode(latest ? "ตรวจล่าสุด " : "ยังไม่มีเวลาตรวจ"));
+  lastChecked.replaceChildren(document.createTextNode(latest ? `${t("lastChecked")} ` : t("noCheckTime")));
   if (latest) lastChecked.append(timeNode(latest));
   const known = services.filter((service) => service.status !== "unknown").length;
-  const count = known < services.length ? `ยืนยันแล้ว ${known} จาก ${services.length} บริการ` : "";
-  get("overview-count").textContent = [count, fromMirror ? "ข้อมูลสำรอง" : ""].filter(Boolean).join(" · ");
+  const count = known < services.length ? t("confirmedCount", { known, total: services.length }) : "";
+  get("overview-count").textContent = [count, fromMirror ? t("mirrorData") : ""].filter(Boolean).join(" · ");
   renderBoard(services);
 
-  const announcement = `${presentation.title} ${detail}`;
+  const announcement = `${title} ${detail}`;
   if (announcement !== lastAnnouncement) get("announcement").textContent = announcement;
   lastAnnouncement = announcement;
 }
 
 function render(snapshot, previous = "") {
+  lastRender = [snapshot, previous];
   const data = snapshot?.data;
   const current = Boolean(data && !previous);
   const now = Date.now();
@@ -449,6 +479,8 @@ async function refreshStatus() {
   }
 }
 
+applyLanguage();
+setupPreferences();
 refresh.addEventListener("click", refreshStatus);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshStatus();

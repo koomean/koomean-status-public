@@ -14,7 +14,7 @@ const iso = (time) => new Date(time).toISOString();
 const thaiDate = (time) => iso(time + 7 * 60 * minute).slice(0, 10);
 const checkStates = ['operational', 'degraded', 'outage'];
 const knownServices = new Set(services.map(({ id }) => id));
-const assets = ['index.html', 'styles.css', 'status.js', 'status-icon.png', 'status-regular.woff2', 'status-semibold.woff2', 'font-license.txt'];
+const assets = ['index.html', 'styles.css', 'status.js', 'status-i18n.js', 'status-preferences.js', 'status-icon.png', 'status-regular.woff2', 'status-semibold.woff2', 'font-license.txt'];
 const primaryDefault = 'https://status.koomean.com/';
 const workerDefault = 'https://koomean-status.meanchannel52.workers.dev/';
 const mirrorDefault = 'https://koomean.github.io/koomean-status-public/';
@@ -92,7 +92,7 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
     (checkStates.includes(status) || status === 'unknown')
   ).map((check) => [check.id, check]));
   const history = {};
-  const components = services.map(({ id, name, group, description, url }) => {
+  const components = services.map(({ id, name, group, description, descriptionEn, url }) => {
     const check = checking.get(id);
     const prior = previous?.mirrorHistory?.[id];
     const primaryComponent = primary?.components.find((item) => item?.id === id);
@@ -117,7 +117,7 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
     history[id] = { days: counts, latest: check ? { status: check.status, checkedAt: check.checkedAt } : null };
     if (maintenance.some((notice) => timestamp(notice.startsAt) <= now && notice.components.includes(id))) status = 'maintenance';
     else if (['operational', 'unknown'].includes(status) && incidents.some((incident) => !incident.resolvedAt && incident.components.includes(id))) status = 'degraded';
-    return { id, name, group, description, ...(url && { url }), status, checkedAt, days, uptime: inheritCurrent ? primaryComponent.uptime : uptime };
+    return { id, name, group, description, descriptionEn, ...(url && { url }), status, checkedAt, days, uptime: inheritCurrent ? primaryComponent.uptime : uptime };
   });
   return { generatedAt: iso(now), staleAfterMinutes, components, incidents, maintenance, mirrorHistory: history };
 }
