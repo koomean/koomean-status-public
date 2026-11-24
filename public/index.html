@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#edf3fb">
+  <meta name="description" content="ดูสถานะการใช้งานเว็บไซต์และบริการ Koo Mean พร้อมเหตุขัดข้องและกำหนดการซ่อมบำรุง">
+  <title>สถานะบริการ | Koo Mean</title>
+  <link rel="icon" href="./status-icon.png" type="image/png">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./status.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">ข้ามไปยังสถานะบริการ</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="./" aria-label="หน้าหลัก Koo Mean Status">
+        <span class="brand-mark" aria-hidden="true">K</span>
+        <span>Koo Mean <span class="brand-detail">Status</span></span>
+      </a>
+      <nav class="site-nav" aria-label="ส่วนต่าง ๆ ในหน้านี้">
+        <a href="#services">บริการ</a>
+        <a href="#incidents">เหตุขัดข้อง</a>
+      </nav>
+      <a class="portal-link" href="https://koomean.com/">ไปที่ Portal</a>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <div class="intro">
+      <div>
+        <h1>สถานะบริการ</h1>
+        <p>ผลตรวจเว็บไซต์และบริการของ Koo Mean</p>
+      </div>
+      <button id="refresh" class="refresh-button" type="button">
+        <span id="refresh-icon" class="refresh-icon" aria-hidden="true">↻</span>
+        รีเฟรชสถานะ
+      </button>
+    </div>
+
+    <section id="overview" class="overview" data-state="unknown" aria-labelledby="overall-title">
+      <div class="overview-main">
+        <div class="signal-frame"><span id="overall-mark" class="signal-mark" aria-hidden="true">…</span></div>
+        <div class="overview-copy">
+          <p class="overview-caption">ภาพรวมระบบ</p>
+          <h2 id="overall-title">กำลังโหลดสถานะ</h2>
+          <p id="overall-message">กำลังดึงผลตรวจล่าสุด</p>
+        </div>
+      </div>
+      <div class="overview-footer">
+        <p id="last-checked">กำลังโหลดเวลา</p>
+        <p id="overview-count"></p>
+      </div>
+    </section>
+    <p id="announcement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+    <noscript><p class="empty-state">เปิดใช้ JavaScript เพื่อดูผลตรวจและประกาศล่าสุด</p></noscript>
+
+    <section id="services" class="section" aria-labelledby="services-heading">
+      <div class="section-heading">
+        <h2 id="services-heading">บริการทั้งหมด</h2>
+        <p>เลือกรายการเพื่อดูผลตรวจย้อนหลัง</p>
+      </div>
+      <div id="service-groups">
+        <p class="empty-state">กำลังโหลดรายการบริการ</p>
+      </div>
+    </section>
+
+    <div class="updates-layout">
+      <section id="incidents" class="section" aria-labelledby="incidents-heading">
+        <div class="section-heading">
+          <h2 id="incidents-heading">เหตุขัดข้อง</h2>
+        </div>
+        <div id="incident-list">
+          <p class="empty-state">กำลังโหลดเหตุขัดข้อง</p>
+        </div>
+      </section>
+      <section id="maintenance" class="section" aria-labelledby="maintenance-heading">
+        <div class="section-heading">
+          <h2 id="maintenance-heading">กำหนดการซ่อมบำรุง</h2>
+        </div>
+        <div id="maintenance-list">
+          <p class="empty-state">กำลังโหลดกำหนดการ</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <a href="./" class="footer-name">Koo Mean Status</a>
+      <a href="https://koomean.github.io/koomean-status-public/" id="backup-link">หน้าสถานะสำรอง</a>
+      <p>เวลาในหน้านี้แสดงตามเวลาไทย (UTC+7)</p>
+    </div>
+  </footer>
+</body>
+</html>

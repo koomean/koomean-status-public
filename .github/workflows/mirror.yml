@@ -1,0 +1,68 @@
+name: Publish status mirror
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
+
+concurrency:
+  group: status-pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      alert: ${{ steps.mirror.outputs.alert }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Build mirror from public checks
+        id: mirror
+        run: node scripts/build-mirror.mjs
+        env:
+          STATUS_PRIMARY_URL: ${{ vars.STATUS_PRIMARY_URL }}
+          STATUS_MIRROR_URL: ${{ vars.STATUS_MIRROR_URL }}
+          STATUS_REPORT_TOKEN: ${{ secrets.STATUS_REPORT_TOKEN }}
+          STATUS_SHORTURL_CANARY_SLUG: ${{ vars.STATUS_SHORTURL_CANARY_SLUG }}
+          STATUS_SHORTURL_CANARY_TARGET: ${{ vars.STATUS_SHORTURL_CANARY_TARGET }}
+          STATUS_SYNOLOGY_HEALTH_PATH: ${{ vars.STATUS_SYNOLOGY_HEALTH_PATH }}
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - name: Deploy public mirror
+        id: pages
+        uses: actions/deploy-pages@v4
+
+  alert:
+    needs: [build, deploy]
+    if: ${{ vars.STATUS_ALERTS_ENABLED == 'true' && needs.build.outputs.alert == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Flag a service outage after the mirror is live
+        run: |
+          echo '::error::The primary status page is unreachable or an external check confirmed a critical outage. See the build summary.'
+          exit 1
