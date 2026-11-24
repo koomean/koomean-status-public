@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runChecks } from '../src/monitor.mjs';
 import { services } from '../src/services.mjs';
+import { expandDetails } from '../src/check-details.mjs';
 
 const minute = 60_000;
 const day = 1_440 * minute;
@@ -12,7 +13,7 @@ const sampleSlot = 5 * minute;
 const timestamp = (date) => Date.parse(date);
 const iso = (time) => new Date(time).toISOString();
 const thaiDate = (time) => iso(time + 7 * 60 * minute).slice(0, 10);
-const checkStates = ['operational', 'degraded', 'outage'];
+const checkStates = ['operational', 'degraded', 'outage', 'maintenance'];
 const knownServices = new Set(services.map(({ id }) => id));
 const assets = ['index.html', 'styles.css', 'status.js', 'status-i18n.js', 'status-preferences.js', 'status-icon.png', 'status-regular.woff2', 'status-semibold.woff2', 'font-license.txt'];
 const primaryDefault = 'https://status.koomean.com/';
@@ -71,13 +72,16 @@ function historyFor({ prior, check, previous, primary, now }) {
       entry.slot = slot;
     }
     const seen = entry.operational + entry.degraded + entry.outage;
-    if (!seen) return { date, status: inherited.get(date) ?? 'unknown' };
+    if (!seen && !entry.maintenance) return { date, status: inherited.get(date) ?? 'unknown' };
     counts.push(entry);
     available += entry.operational + entry.degraded;
     total += seen;
-    let status = entry.outage === seen ? 'outage' : entry.outage || entry.degraded ? 'degraded' : 'operational';
+    let status = entry.outage > 0 && entry.outage === seen && !entry.maintenance
+      ? 'outage' : entry.outage || entry.degraded ? 'degraded' : entry.maintenance ? 'maintenance' : 'operational';
     const earlier = inherited.get(date);
-    if (earlier && earlier !== status) status = 'degraded';
+    if (earlier && earlier !== status) {
+      status = [earlier, status].every((state) => state === 'operational' || state === 'maintenance') ? 'maintenance' : 'degraded';
+    }
     return { date, status };
   });
   return { days, counts, uptime: total ? Math.round(available * 10_000 / total) / 100 : null };
@@ -92,7 +96,7 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
     (checkStates.includes(status) || status === 'unknown')
   ).map((check) => [check.id, check]));
   const history = {};
-  const components = services.map(({ id, name, group, description, descriptionEn, url }) => {
+  const components = services.map(({ id, name, group, description, descriptionEn, url, checks: descriptors }) => {
     const check = checking.get(id);
     const prior = previous?.mirrorHistory?.[id];
     const primaryComponent = primary?.components.find((item) => item?.id === id);
@@ -117,7 +121,14 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
     history[id] = { days: counts, latest: check ? { status: check.status, checkedAt: check.checkedAt } : null };
     if (maintenance.some((notice) => timestamp(notice.startsAt) <= now && notice.components.includes(id))) status = 'maintenance';
     else if (['operational', 'unknown'].includes(status) && incidents.some((incident) => !incident.resolvedAt && incident.components.includes(id))) status = 'degraded';
-    return { id, name, group, description, descriptionEn, ...(url && { url }), status, checkedAt, days, uptime: inheritCurrent ? primaryComponent.uptime : uptime };
+    const primaryChecks = Array.isArray(primaryComponent?.checks) ? primaryComponent.checks.flatMap((detail) => {
+      const age = now - timestamp(detail.checkedAt);
+      return age >= -minute && age < 16 * minute ? [{ checks: [detail], checkedAt: detail.checkedAt }] : [];
+    }) : [];
+    const externalChecks = check ? [{ checks: check.checks, checkedAt: check.checkedAt }] : [];
+    const details = expandDetails(descriptors, [...primaryChecks, ...externalChecks]);
+    return { id, name, group, description, descriptionEn, ...(url && { url }), status, checkedAt, days,
+      uptime: inheritCurrent ? primaryComponent.uptime : uptime, checks: details };
   });
   return { generatedAt: iso(now), staleAfterMinutes, components, incidents, maintenance, mirrorHistory: history };
 }

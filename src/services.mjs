@@ -14,20 +14,47 @@ const serviceUrls = {
   synology: `${drive}/`,
 };
 
+function website(url, title) {
+  return { id: 'website', label: 'หน้าเว็บไซต์', labelEn: 'Website', url, title };
+}
+
+function sharedApi(id, label, labelEn, query, json) {
+  return { id, label, labelEn, url: `${api}?${query}`, json, fresh: true, sharedMaintenance: true };
+}
+
+const applications = sharedApi('applications', 'ข้อมูลแอปในฐานข้อมูล', 'App catalogue database reads',
+  'client=portal&action=bootstrap', (payload) => Array.isArray(payload?.applications));
+const posts = sharedApi('posts', 'ข้อมูลโพสต์ในฐานข้อมูล', 'Blog post database reads',
+  'client=blog&action=postsOnly&limit=1', (payload) => payload?.success === true && Array.isArray(payload.posts));
+const links = sharedApi('links', 'ข้อมูลลิงก์ในฐานข้อมูล', 'Link directory database reads',
+  'client=site&action=bootstrap', (payload) => Array.isArray(payload?.links));
+const sharedDatabase = {
+  id: 'database', label: 'การเชื่อมต่อฐานข้อมูล D1', labelEn: 'D1 database connectivity',
+  url: `${api}?action=maintenanceStatus`,
+  json: (payload) => payload?.success === true && typeof payload.maintenance?.active === 'boolean',
+};
+
 const checks = {
-  portal: [{ url: serviceUrls.portal, title: /^Koo Mean Portal$/i }],
-  blog: [{ url: serviceUrls.blog, title: /^Koo Mean Blog$/i }],
-  link: [{ url: serviceUrls.link, title: /^Koo Mean SITE(?: V[.\s]*\d+(?:\.\d+)*)?$/i }],
-  dashboard: [{ url: serviceUrls.dashboard, title: /Koo Mean.*Admin Dashboard/i }],
-  terms: [{ url: serviceUrls.terms, title: /ข้อกำหนดการใช้บริการ|terms of service/i }],
-  privacy: [{ url: serviceUrls.privacy, title: /นโยบายความเป็นส่วนตัว|privacy policy/i }],
-  lunav: [{ url: serviceUrls.lunav, title: /^LunaV(?:\s|$)/i }],
-  shorturl: [{ url: `${serviceUrls.shorturl}health`, json: (payload) => payload?.ok === true && typeof payload.version === 'string' }],
-  api: [
-    { url: `${api}?client=portal&action=bootstrap`, json: (payload) => Array.isArray(payload?.applications) },
-    { url: `${api}?client=blog&action=postsOnly&limit=1`, json: (payload) => payload?.success === true && Array.isArray(payload.posts) },
+  portal: [website(serviceUrls.portal, /^Koo Mean Portal$/i), applications],
+  blog: [website(serviceUrls.blog, /^Koo Mean Blog$/i), posts],
+  link: [website(serviceUrls.link, /^Koo Mean SITE(?: V[.\s]*\d+(?:\.\d+)*)?$/i), links],
+  dashboard: [website(serviceUrls.dashboard, /Koo Mean.*Admin Dashboard/i), sharedDatabase],
+  terms: [website(serviceUrls.terms, /ข้อกำหนดการใช้บริการ|terms of service/i)],
+  privacy: [website(serviceUrls.privacy, /นโยบายความเป็นส่วนตัว|privacy policy/i)],
+  lunav: [website(serviceUrls.lunav, /^LunaV(?:\s|$)/i)],
+  shorturl: [
+    { id: 'database', label: 'การเชื่อมต่อฐานข้อมูลลิงก์', labelEn: 'Short link database connectivity',
+      url: `${serviceUrls.shorturl}health`, json: (payload) => payload?.ok === true && typeof payload.version === 'string' },
+    { id: 'login', label: 'หน้าเข้าสู่ระบบ Short URL', labelEn: 'Short URL sign-in page',
+      url: `${serviceUrls.shorturl}login`, title: /^เข้าสู่ระบบ · Koo Mean$/i,
+      maintenanceTitle: /^กำลังปรับปรุงระบบ · Koo Mean$/i },
+    { id: 'redirect', label: 'การทำงานของลิงก์สั้น', labelEn: 'Short link redirect', url: null },
   ],
-  synology: [{ url: `${serviceUrls.synology}?launchApp=SYNO.SDS.Drive.Application`, title: /^Koo(?:\s|&nbsp;)+Mean(?:\s|&nbsp;)+NAS$/i }],
+  api: [sharedDatabase, applications, posts],
+  synology: [
+    website(`${serviceUrls.synology}?launchApp=SYNO.SDS.Drive.Application`, /^Koo(?:\s|&nbsp;)+Mean(?:\s|&nbsp;)+NAS$/i),
+    { id: 'database', label: 'ระบบข้อมูลภายใน Drive', labelEn: 'Internal Drive data services', url: null },
+  ],
 };
 
 const components = [
@@ -64,16 +91,20 @@ export function checksFor(service, env) {
     const slug = env.STATUS_SHORTURL_CANARY_SLUG;
     const target = httpsTarget(env.STATUS_SHORTURL_CANARY_TARGET);
     if (typeof slug === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(slug) && target) {
-      return [...service.checks, {
+      return service.checks.map((check) => check.id === 'redirect' ? {
+        ...check,
         url: `${serviceUrls.shorturl}${slug}`,
         redirectTo: target.href,
-      }];
+        method: 'HEAD',
+      } : check);
     }
   }
   if (service.id === 'synology') {
     const path = env.STATUS_SYNOLOGY_HEALTH_PATH;
     if (typeof path === 'string' && /^(?:\/[a-z0-9_-]+(?:\.[a-z0-9_-]+)*)+\/?$/i.test(path)) {
-      return [...service.checks, { url: `${drive}${path}`, json: (payload) => payload?.ok === true }];
+      return service.checks.map((check) => check.id === 'database' ? {
+        ...check, url: `${drive}${path}`, json: (payload) => payload?.ok === true,
+      } : check);
     }
   }
   return service.checks;

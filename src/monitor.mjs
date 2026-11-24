@@ -40,18 +40,29 @@ async function inspectResponse(response, check) {
   if (response.headers.get('cf-mitigated') === 'challenge') {
     return { status: 'unknown', detail: 'access_blocked' };
   }
-  if (check.redirectTo) {
-    return matchesRedirect(response, check) ? null : { status: 'outage', detail: 'unexpected_response' };
-  }
-  if (!response.ok) return { status: 'outage', detail: 'http_error' };
-
   const contentType = response.headers.get('content-type') ?? '';
-  if (check.title && /^text\/html\b/i.test(contentType)) {
+  if (response.status === 503 && check.sharedMaintenance && /^application\/json\b/i.test(contentType)) {
+    const body = await readBody(response, { limit: 16_384 });
+    try {
+      const message = JSON.parse(body);
+      if (message?.error === 'maintenance' && message?.maintenance?.active === true) {
+        return { status: 'maintenance', detail: 'upstream_maintenance' };
+      }
+    } catch {
+      // Invalid error bodies still represent an unsuccessful HTTP response.
+    }
+  }
+  if ((check.title || check.maintenanceTitle) && /^text\/html\b/i.test(contentType)) {
     const body = await readBody(response, { limit: 65_536, stopAtTitle: true });
     const title = body.match(/<title(?:\s[^>]*)?>([^<]*)<\/title\s*>/i)?.[1]?.trim();
-    if (title && check.title.test(title)) return null;
+    if (title && response.status === 503 && check.maintenanceTitle?.test(title)) {
+      return { status: 'maintenance', detail: 'upstream_maintenance' };
+    }
+    if (title && response.ok && check.title?.test(title)) return null;
   }
-  if (check.json && /^application\/json\b/i.test(contentType)) {
+  if (check.redirectTo && matchesRedirect(response, check)) return null;
+  if (!response.ok && !redirectStatuses.includes(response.status)) return { status: 'outage', detail: 'http_error' };
+  if (response.ok && check.json && /^application\/json\b/i.test(contentType)) {
     const body = await readBody(response, { limit: 524_288 });
     try {
       if (check.json(JSON.parse(body))) return null;
@@ -63,9 +74,11 @@ async function inspectResponse(response, check) {
 }
 
 async function probe(check, fetcher, external) {
+  if (!check.url) return { status: 'unknown', detail: 'not_configured', latencyMs: null };
   const started = Date.now();
   const controller = new AbortController();
   let timer;
+  let httpStatus;
   const deadline = new Promise((resolve) => {
     timer = setTimeout(() => {
       resolve({ status: 'outage', detail: 'timeout' });
@@ -76,13 +89,17 @@ async function probe(check, fetcher, external) {
   const request = async () => {
     let response;
     try {
-      response = await fetcher(check.url, {
-        method: 'GET',
+      const url = new URL(check.url);
+      if (check.fresh) url.searchParams.set('status_probe', crypto.randomUUID());
+      response = await fetcher(url.href, {
+        cache: 'no-store',
+        method: check.method ?? 'GET',
         redirect: 'manual',
         credentials: 'omit',
         headers: { 'User-Agent': `KooMean-Status/1.0 (${external ? 'external' : 'worker'})` },
         signal: controller.signal,
       });
+      httpStatus = response.status;
       return await inspectResponse(response, check);
     } catch {
       return { status: 'outage', detail: controller.signal.aborted ? 'timeout' : 'network_error' };
@@ -91,44 +108,57 @@ async function probe(check, fetcher, external) {
     }
   };
 
-  const failure = await Promise.race([deadline, request()]);
+  const result = await Promise.race([deadline, request()]);
   clearTimeout(timer);
   const latencyMs = Math.max(0, Date.now() - started);
-  if (failure) return { ...failure, latencyMs };
-  if (latencyMs >= slowAfterMs) return { status: 'degraded', detail: 'slow_response', latencyMs };
-  return { status: 'operational', detail: 'reachable', latencyMs };
+  const observation = { latencyMs, ...(httpStatus && { httpStatus }) };
+  if (result) return { ...result, ...observation };
+  if (latencyMs >= slowAfterMs) return { ...observation, status: 'degraded', detail: 'slow_response' };
+  return { ...observation, status: 'operational', detail: 'reachable' };
 }
 
 function summarize(results) {
-  const outage = results.find((result) => result.status === 'outage');
+  const configured = results.filter((result) => result.detail !== 'not_configured');
+  const maintenance = configured.find((result) => result.status === 'maintenance');
+  if (maintenance && configured.some((result) => ['operational', 'degraded'].includes(result.status))) return maintenance;
+  const outage = configured.find((result) => result.status === 'outage');
   if (outage) {
-    if (results.every((result) => result.status === 'outage')) return outage;
+    if (configured.every((result) => result.status === 'outage')) return outage;
     return { status: 'degraded', detail: 'partial_failure' };
   }
-  return results.find((result) => result.status === 'unknown')
-    ?? results.find((result) => result.status === 'degraded')
-    ?? results[0]
+  return maintenance
+    ?? configured.find((result) => result.status === 'unknown')
+    ?? configured.find((result) => result.status === 'degraded')
+    ?? configured[0]
     ?? { status: 'unknown', detail: 'not_configured' };
 }
 
 export async function runChecks({ fetcher = fetch, env = {}, external = false } = {}) {
-  const plans = services.map((service) => ({ service, checks: checksFor(service, env), results: [] }));
-  const queue = plans.flatMap((plan) => plan.checks.map((check, index) => ({ plan, check, index })));
+  const plans = services.map((service) => ({ id: service.id, checks: checksFor(service, env) }));
+  const queue = [...new Set(plans.flatMap((plan) => plan.checks))];
+  const observations = new Map();
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(5, queue.length) }, async () => {
     while (next < queue.length) {
-      const { plan, check, index } = queue[next++];
-      plan.results[index] = await probe(check, fetcher, external);
+      const check = queue[next++];
+      observations.set(check, await probe(check, fetcher, external));
     }
   }));
-  return plans.map(({ service, results }) => {
+  const checkedAt = new Date().toISOString();
+  return plans.map(({ id, checks }) => {
+    const results = checks.map((check) => observations.get(check));
     const { status, detail } = summarize(results);
+    const latencies = results.map((result) => result.latencyMs).filter(Number.isFinite);
     return {
-      id: service.id,
+      id,
       status,
-      checkedAt: new Date().toISOString(),
-      latencyMs: results.length ? Math.max(...results.map((result) => result.latencyMs)) : null,
+      checkedAt,
+      latencyMs: latencies.length ? Math.max(...latencies) : null,
       detail,
+      checks: checks.map((check) => {
+        const { status, detail, httpStatus } = observations.get(check);
+        return { id: check.id, status, reason: detail, ...(httpStatus && { httpStatus }) };
+      }),
     };
   });
 }

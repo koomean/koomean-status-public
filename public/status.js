@@ -161,6 +161,29 @@ function serviceAddress(value) {
   }
 }
 
+function diagnosticList(checks) {
+  const section = element("section", "diagnostics");
+  section.append(element("h4", "diagnostics-heading", t("componentChecks")));
+  if (!checks.length) {
+    section.append(element("p", "", t("noComponentChecks")));
+    return section;
+  }
+  const list = element("ul", "diagnostics-list");
+  for (const check of checks) {
+    const row = element("li", "diagnostic");
+    const label = language === "en" ? (check.labelEn || check.label) : check.label;
+    row.append(element("strong", "diagnostic-name", label), pill(rowStatus(check.status)));
+    const key = `reason.${check.reason}`;
+    const copy = t(key) === key ? t("reason.not_checked") : t(key);
+    const code = Number.isInteger(check.httpStatus) && check.httpStatus >= 400
+      ? t("statusHttpCode", { code: check.httpStatus }) : "";
+    row.append(element("span", "diagnostic-reason", [copy, code].filter(Boolean).join(" · ")));
+    list.append(row);
+  }
+  section.append(list);
+  return section;
+}
+
 function serviceRow(service) {
   const row = element("article", "service");
   row.id = `service-${service.id}`;
@@ -203,7 +226,7 @@ function serviceRow(service) {
     uptime.append(element("strong", "", percentFormat.format(service.uptime / 100)));
     meta.append(uptime);
   }
-  content.append(meta, historyStrip(service.days) || element("p", "", t("noDailyHistory")));
+  content.append(diagnosticList(service.checks), meta, historyStrip(service.days) || element("p", "", t("noDailyHistory")));
   row.append(content);
   return row;
 }
@@ -416,7 +439,11 @@ function render(snapshot, previous = "") {
       if (current && currentlyMaintained.has(item.id)) status = "maintenance";
       else if (current && fresh(item.checkedAt, maxAge, now)) status = rowStatus(item.status);
       if (current && currentlyAffected.has(item.id) && (status === "operational" || status === "unknown")) status = "degraded";
-      return { ...item, status };
+      const checks = listed(item.checks).map((check) => {
+        if (current && fresh(check.checkedAt, maxAge, now)) return check;
+        return { ...check, status: "unknown", reason: check.reason === "not_configured" ? check.reason : "not_checked", httpStatus: undefined };
+      });
+      return { ...item, status, checks };
     });
   const states = new Set(services.map(({ status }) => status));
   const overall = ["outage", "degraded", "maintenance", "unknown", "operational"]
