@@ -1,4 +1,5 @@
 const api = 'https://koomean-proxy.meanchannel52.workers.dev/';
+const drive = 'https://drive.koomean.com';
 
 const checks = {
   portal: [{ url: 'https://koomean.com/', title: /^Koo Mean Portal$/i }],
@@ -13,7 +14,7 @@ const checks = {
     { url: `${api}?client=portal&action=bootstrap`, json: (payload) => Array.isArray(payload?.applications) },
     { url: `${api}?client=blog&action=postsOnly&limit=1`, json: (payload) => payload?.success === true && Array.isArray(payload.posts) },
   ],
-  synology: [],
+  synology: [{ url: `${drive}/?launchApp=SYNO.SDS.Drive.Application`, title: /^Koo(?:\s|&nbsp;)+Mean(?:\s|&nbsp;)+NAS$/i }],
 };
 
 const components = [
@@ -26,7 +27,7 @@ const components = [
   { id: 'shorturl', name: 'Short URL', group: 'Platform', description: 'ระบบบริการลิงก์สั้น', critical: true },
   { id: 'dashboard', name: 'Admin Dashboard', group: 'Platform', description: 'หน้าเข้าสู่ระบบของผู้ดูแล' },
   { id: 'api', name: 'Shared API', group: 'Platform', description: 'ข้อมูลแอปใน Portal และโพสต์ใน Blog', critical: true },
-  { id: 'synology', name: 'Synology Drive', group: 'Infrastructure', description: 'บริการไฟล์ผ่าน Synology' },
+  { id: 'synology', name: 'Synology Drive', group: 'Infrastructure', description: 'หน้าเข้าสู่ระบบ Synology Drive' },
 ];
 
 export const services = components.map((component) => ({
@@ -58,7 +59,7 @@ export function checksFor(service, env) {
   if (service.id === 'synology') {
     const path = env.STATUS_SYNOLOGY_HEALTH_PATH;
     if (typeof path === 'string' && /^(?:\/[a-z0-9_-]+(?:\.[a-z0-9_-]+)*)+\/?$/i.test(path)) {
-      return [{ url: `https://synology.koomean.com${path}`, json: (payload) => payload?.ok === true }];
+      return [...service.checks, { url: `${drive}${path}`, json: (payload) => payload?.ok === true }];
     }
   }
   return service.checks;

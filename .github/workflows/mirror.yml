@@ -32,6 +32,7 @@ jobs:
         run: node scripts/build-mirror.mjs
         env:
           STATUS_PRIMARY_URL: ${{ vars.STATUS_PRIMARY_URL }}
+          STATUS_WORKER_URL: ${{ vars.STATUS_WORKER_URL }}
           STATUS_MIRROR_URL: ${{ vars.STATUS_MIRROR_URL }}
           STATUS_REPORT_TOKEN: ${{ secrets.STATUS_REPORT_TOKEN }}
           STATUS_SHORTURL_CANARY_SLUG: ${{ vars.STATUS_SHORTURL_CANARY_SLUG }}

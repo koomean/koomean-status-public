@@ -16,6 +16,7 @@ const checkStates = ['operational', 'degraded', 'outage'];
 const knownServices = new Set(services.map(({ id }) => id));
 const assets = ['index.html', 'styles.css', 'status.js', 'status-icon.png'];
 const primaryDefault = 'https://status.koomean.com/';
+const workerDefault = 'https://koomean-status.meanchannel52.workers.dev/';
 const mirrorDefault = 'https://koomean.github.io/koomean-status-public/';
 
 function publicNotice(notice) {
@@ -94,25 +95,29 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
   const components = services.map(({ id, name, group, description }) => {
     const check = checking.get(id);
     const prior = previous?.mirrorHistory?.[id];
-    const checkedAt = check?.checkedAt ?? null;
+    const primaryComponent = primary?.components.find((item) => item?.id === id);
+    const primaryAge = now - timestamp(primaryComponent?.checkedAt);
+    const primaryFresh = primaryAge >= -minute && primaryAge < 16 * minute;
+    const inheritCurrent = check?.detail === 'access_blocked' && primaryFresh && checkStates.includes(primaryComponent.status);
+    const checkedAt = inheritCurrent ? primaryComponent.checkedAt : check?.checkedAt ?? null;
     const { days, counts, uptime } = historyFor({
       prior, check, now,
       previous: previous?.components.find((item) => item?.id === id),
-      primary: primary?.components.find((item) => item?.id === id),
+      primary: primaryComponent,
     });
     const last = prior?.latest;
     const checkTime = timestamp(checkedAt);
-    let status = check?.status ?? 'unknown';
-    if (status === 'outage') {
+    let status = inheritCurrent ? primaryComponent.status : check?.status ?? 'unknown';
+    if (!inheritCurrent && status === 'outage') {
       const previousTime = timestamp(last?.checkedAt);
       const freshFailure = last?.status === 'outage' && checkTime - previousTime <= staleAfterMinutes * minute &&
         Math.floor(previousTime / sampleSlot) < Math.floor(checkTime / sampleSlot);
       if (!freshFailure) status = 'degraded';
     }
-    history[id] = { days: counts, latest: check ? { status: check.status, checkedAt } : null };
+    history[id] = { days: counts, latest: check ? { status: check.status, checkedAt: check.checkedAt } : null };
     if (maintenance.some((notice) => timestamp(notice.startsAt) <= now && notice.components.includes(id))) status = 'maintenance';
     else if (['operational', 'unknown'].includes(status) && incidents.some((incident) => !incident.resolvedAt && incident.components.includes(id))) status = 'degraded';
-    return { id, name, group, description, status, checkedAt, days, uptime };
+    return { id, name, group, description, status, checkedAt, days, uptime: inheritCurrent ? primaryComponent.uptime : uptime };
   });
   return { generatedAt: iso(now), staleAfterMinutes, components, incidents, maintenance, mirrorHistory: history };
 }
@@ -129,21 +134,23 @@ function httpsBase(configured, fallback) {
 }
 
 async function loadSnapshot(fetcher, base, path, now) {
-  if (!base) return null;
+  const unavailable = { data: null, state: 'unavailable' };
+  if (!base) return unavailable;
   const url = new URL(path, base);
   url.searchParams.set('refresh', String(now));
   try {
     const response = await fetcher(url, {
       redirect: 'error', signal: AbortSignal.timeout(4_000), headers: { Accept: 'application/json' },
     });
-    if (!response.ok) return null;
+    if (response.headers.get('cf-mitigated') === 'challenge') return { data: null, state: 'challenged' };
+    if (!response.ok) return unavailable;
     const body = await response.json();
     if (Number.isFinite(timestamp(body?.generatedAt)) && timestamp(body.generatedAt) <= now + minute &&
-      Array.isArray(body.components) && Array.isArray(body.incidents) && Array.isArray(body.maintenance)) return body;
+      Array.isArray(body.components) && Array.isArray(body.incidents) && Array.isArray(body.maintenance)) return { data: body, state: 'reachable' };
   } catch {
-    return null;
+    return unavailable;
   }
-  return null;
+  return unavailable;
 }
 
 async function sendReport(fetcher, base, token, checks) {
@@ -168,16 +175,20 @@ export async function buildMirror({
 } = {}) {
   const started = clock();
   const primaryBase = httpsBase(env.STATUS_PRIMARY_URL, primaryDefault);
+  const workerBase = httpsBase(env.STATUS_WORKER_URL, env.STATUS_PRIMARY_URL ? null : workerDefault);
   const mirrorBase = httpsBase(env.STATUS_MIRROR_URL, mirrorDefault);
-  const [observations, primary, previous] = await Promise.all([
+  const [observations, direct, worker, previous] = await Promise.all([
     check({ fetcher, env, external: true }),
     loadSnapshot(fetcher, primaryBase, 'api/status', started),
+    loadSnapshot(fetcher, workerBase, 'api/status', started),
     loadSnapshot(fetcher, mirrorBase, 'status-data.json', started),
   ]);
   const now = clock();
-  const primaryAvailable = primary && timestamp(primary.generatedAt) >= now - staleAfterMinutes * minute;
-  const snapshot = createSnapshot({ observations, primary, previous, now });
-  const report = sendReport(fetcher, primaryBase, env.STATUS_REPORT_TOKEN, observations);
+  const primary = [direct.data, worker.data].filter(Boolean).sort((a, b) => timestamp(b.generatedAt) - timestamp(a.generatedAt))[0];
+  const hasFreshSnapshot = primary && timestamp(primary.generatedAt) >= now - staleAfterMinutes * minute;
+  const primaryAvailable = Boolean(hasFreshSnapshot && direct.state !== 'unavailable');
+  const snapshot = createSnapshot({ observations, primary, previous: previous.data, now });
+  const report = sendReport(fetcher, workerBase || primaryBase, env.STATUS_REPORT_TOKEN, observations);
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
   await Promise.all([
@@ -188,13 +199,15 @@ export async function buildMirror({
   const critical = services.filter((service) => service.critical &&
     snapshot.components.some(({ id, status }) => service.id === id && status === 'outage')
   ).map(({ name }) => name);
-  return { primaryAvailable: Boolean(primaryAvailable), critical, report: await report };
+  return { primaryAvailable, direct: direct.state, worker: worker.state, critical, report: await report,
+    challenged: observations.filter(({ detail }) => detail === 'access_blocked').map(({ id }) => id) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { primaryAvailable, critical, report } = await buildMirror();
+  const { primaryAvailable, direct, worker, critical, report, challenged } = await buildMirror();
   const summary = [
-    `Primary status API ${primaryAvailable ? 'available' : 'unavailable'}`,
+    `Primary status API ${primaryAvailable ? 'available' : 'unavailable'} (custom domain ${direct}, Worker endpoint ${worker})`,
+    `External checks challenged by the edge ${challenged.length ? challenged.join(', ') : 'none'}`,
     `Reporting ${report}`,
     `Confirmed critical outages ${critical.length ? critical.join(', ') : 'none'}`,
   ];
