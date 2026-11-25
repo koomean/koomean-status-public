@@ -5,11 +5,15 @@ const groupIcons = new Map([["Websites", "web"], ["Platform", "platform"], ["Inf
 const incidentTones = { investigating: "degraded", identified: "degraded", monitoring: "maintenance", resolved: "operational" };
 const defaultStaleMinutes = 15;
 const timeZone = "Asia/Bangkok";
+const presenceEndpoint = "https://koomean-status.meanchannel52.workers.dev/api/presence";
+const presencePollMs = 15_000;
 const get = (id) => document.getElementById(id);
 const i18n = globalThis.statusI18n;
 const preferences = globalThis.statusPreferences;
 const refresh = get("refresh");
 const backupLink = get("backup-link");
+const liveVisitors = get("live-visitors");
+const liveSites = [...liveVisitors.querySelectorAll("[data-live-site]")];
 if (backupLink.origin === window.location.origin) {
   backupLink.href = "https://status.koomean.com/";
   backupLink.dataset.i18n = "primaryPage";
@@ -23,6 +27,8 @@ let lastRender;
 let lastSnapshot;
 let loading = false;
 let lastAnnouncement = "";
+let presence;
+let presenceLoading = false;
 
 const t = (key, vars) => i18n.text(language, key, vars);
 const plural = (key, count, vars) => i18n.plural(language, key, count, vars);
@@ -44,6 +50,45 @@ function applyLanguage() {
   for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
   for (const node of document.querySelectorAll("[data-i18n-label]")) node.setAttribute("aria-label", t(node.dataset.i18nLabel));
   if (lastRender) render(...lastRender);
+  renderPresence();
+}
+
+function renderPresence() {
+  liveVisitors.dataset.live = String(Boolean(presence));
+  get("live-visitors-sites").hidden = !presence;
+  get("live-visitors-total").hidden = !presence;
+  const message = presence
+    ? t("liveVisitorsWindow", { seconds: presence.windowSeconds })
+    : t(presence === null ? "liveVisitorsUnavailable" : "liveVisitorsLoading");
+  get("live-visitors-message").textContent = message;
+  if (!presence) return;
+
+  const formatCount = new Intl.NumberFormat(i18n.locale(language));
+  for (const node of liveSites) node.textContent = formatCount.format(presence.sites[node.dataset.liveSite]);
+  get("live-visitors-number").textContent = formatCount.format(presence.total);
+}
+
+async function refreshPresence() {
+  if (document.hidden || presenceLoading) return;
+  presenceLoading = true;
+  try {
+    const response = await fetch(presenceEndpoint, {
+      cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) throw new Error("Live visitor counts unavailable");
+    const data = await response.json();
+    const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
+    if (!validCount(data.total) || !Number.isSafeInteger(data.windowSeconds) || data.windowSeconds <= 0 ||
+        !liveSites.every((node) => validCount(data.sites?.[node.dataset.liveSite]))) {
+      throw new Error("Invalid visitor counts");
+    }
+    presence = data;
+  } catch {
+    presence = null;
+  } finally {
+    presenceLoading = false;
+    renderPresence();
+  }
 }
 
 function setupPreferences() {
@@ -549,10 +594,16 @@ async function refreshStatus() {
 
 applyLanguage();
 setupPreferences();
+liveVisitors.hidden = false;
 refresh.addEventListener("click", refreshStatus);
+refresh.addEventListener("click", refreshPresence);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshStatus();
+  if (!document.hidden) {
+    refreshStatus();
+    refreshPresence();
+  }
 });
+window.setInterval(refreshPresence, presencePollMs);
 window.setInterval(() => {
   if (!document.hidden) refreshStatus();
 }, 60000);
@@ -562,3 +613,4 @@ window.setInterval(() => {
   for (const countdown of document.querySelectorAll("[data-reopen-at]")) updateCountdown(countdown, now);
 }, 1000);
 refreshStatus();
+refreshPresence();

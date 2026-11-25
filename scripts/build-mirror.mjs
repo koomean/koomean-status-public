@@ -15,7 +15,7 @@ const iso = (time) => new Date(time).toISOString();
 const thaiDate = (time) => iso(time + 7 * 60 * minute).slice(0, 10);
 const checkStates = ['operational', 'degraded', 'outage', 'maintenance'];
 const knownServices = new Set(services.map(({ id }) => id));
-const assets = ['index.html', 'styles.css', 'status.js', 'status-i18n.js', 'status-preferences.js', 'status-icon.png', 'status-regular.woff2', 'status-semibold.woff2', 'font-license.txt'];
+const assets = ['index.html', 'styles.css', 'status.js', 'status-i18n.js', 'status-preferences.js', 'presence.js', 'status-icon.png', 'status-regular.woff2', 'status-semibold.woff2', 'font-license.txt'];
 const primaryDefault = 'https://status.koomean.com/';
 const workerDefault = 'https://koomean-status.meanchannel52.workers.dev/';
 const mirrorDefault = 'https://koomean.github.io/koomean-status-public/';

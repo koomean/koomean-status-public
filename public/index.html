@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://koomean-status.meanchannel52.workers.dev/api/presence; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#f4f6fa">
   <meta name="description" content="ดูสถานะการใช้งานเว็บไซต์และบริการ Koo Mean พร้อมเหตุขัดข้องและกำหนดการซ่อมบำรุง">
@@ -12,6 +12,7 @@
   <script src="./status-preferences.js"></script>
   <link rel="stylesheet" href="./styles.css">
   <script src="./status-i18n.js" defer></script>
+  <script src="./presence.js" defer></script>
   <script src="./status.js" defer></script>
 </head>
 <body>
@@ -92,6 +93,23 @@
     </section>
     <p id="announcement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
     <noscript><p class="empty-state">เปิดใช้ JavaScript เพื่อดูผลตรวจและประกาศล่าสุด / <span lang="en">Enable JavaScript to view status and updates.</span></p></noscript>
+
+    <section id="live-visitors" class="live-visitors" aria-labelledby="live-visitors-heading" hidden>
+      <div class="live-visitors-intro">
+        <h2 id="live-visitors-heading" data-i18n="liveVisitors">ผู้ใช้งานออนไลน์</h2>
+        <p id="live-visitors-message"></p>
+      </div>
+      <dl id="live-visitors-sites" class="live-visitors-sites" hidden>
+        <div><dt>Portal</dt><dd data-live-site="portal"></dd></div>
+        <div><dt>Blog</dt><dd data-live-site="blog"></dd></div>
+        <div><dt>Link</dt><dd data-live-site="link"></dd></div>
+        <div><dt>Status</dt><dd data-live-site="status"></dd></div>
+      </dl>
+      <div id="live-visitors-total" class="live-visitors-total" hidden>
+        <span data-i18n="liveVisitorsTotal">รวม</span>
+        <strong id="live-visitors-number"></strong>
+      </div>
+    </section>
 
     <section id="services" class="section" aria-labelledby="services-heading">
       <div class="section-heading">
