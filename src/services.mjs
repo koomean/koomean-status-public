@@ -48,7 +48,8 @@ const checks = {
     { id: 'login', label: 'หน้าเข้าสู่ระบบ Short URL', labelEn: 'Short URL sign-in page',
       url: `${serviceUrls.shorturl}login`, title: /^เข้าสู่ระบบ · Koo Mean$/i,
       maintenanceTitle: /^กำลังปรับปรุงระบบ · Koo Mean$/i },
-    { id: 'redirect', label: 'การทำงานของลิงก์สั้น', labelEn: 'Short link redirect', url: null },
+    { id: 'redirect', label: 'การทำงานของลิงก์สั้น', labelEn: 'Short link redirect',
+      url: `${serviceUrls.shorturl}statuscheck`, redirectTo: 'https://status.koomean.com/', method: 'HEAD' },
   ],
   api: [sharedDatabase, applications, posts],
   synology: [
@@ -95,7 +96,6 @@ export function checksFor(service, env) {
         ...check,
         url: `${serviceUrls.shorturl}${slug}`,
         redirectTo: target.href,
-        method: 'HEAD',
       } : check);
     }
   }

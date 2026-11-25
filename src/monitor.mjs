@@ -149,7 +149,16 @@ export async function runChecks({ fetcher = fetch, env = {}, external = false } 
   }));
   const checkedAt = new Date().toISOString();
   return plans.map(({ id, checks }) => {
-    const results = checks.map((check) => observations.get(check));
+    const login = id === 'shorturl' ? observations.get(checks.find((check) => check.id === 'login')) : undefined;
+    const results = checks.map((check) => {
+      const result = observations.get(check);
+      if (check.id === 'redirect' && result.httpStatus === 503 && result.detail === 'http_error' &&
+          login?.status === 'maintenance') {
+        // The HEAD response has no body, so use the maintenance page from the same service.
+        return { ...result, status: 'maintenance', detail: 'upstream_maintenance', reopenAt: login.reopenAt };
+      }
+      return result;
+    });
     const { status, detail } = summarize(results);
     const latencies = results.map((result) => result.latencyMs).filter(Number.isFinite);
     return {
@@ -158,9 +167,8 @@ export async function runChecks({ fetcher = fetch, env = {}, external = false } 
       checkedAt,
       latencyMs: latencies.length ? Math.max(...latencies) : null,
       detail,
-      checks: checks.map((check) => {
-        const { status, detail, httpStatus, reopenAt } = observations.get(check);
-        return { id: check.id, status, reason: detail, ...(httpStatus && { httpStatus }), ...(reopenAt && { reopenAt }) };
+      checks: results.map(({ status, detail, httpStatus, reopenAt }, index) => {
+        return { id: checks[index].id, status, reason: detail, ...(httpStatus && { httpStatus }), ...(reopenAt && { reopenAt }) };
       }),
     };
   });
