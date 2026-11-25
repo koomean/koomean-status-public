@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runChecks } from '../src/monitor.mjs';
 import { services } from '../src/services.mjs';
-import { expandDetails } from '../src/check-details.mjs';
+import { activeMaintenance, expandDetails, reopeningDeadline } from '../src/check-details.mjs';
 
 const minute = 60_000;
 const day = 1_440 * minute;
@@ -119,7 +119,8 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
       if (!freshFailure) status = 'degraded';
     }
     history[id] = { days: counts, latest: check ? { status: check.status, checkedAt: check.checkedAt } : null };
-    if (maintenance.some((notice) => timestamp(notice.startsAt) <= now && notice.components.includes(id))) status = 'maintenance';
+    const windows = activeMaintenance(maintenance, id, now);
+    if (windows.length) status = 'maintenance';
     else if (['operational', 'unknown'].includes(status) && incidents.some((incident) => !incident.resolvedAt && incident.components.includes(id))) status = 'degraded';
     const primaryChecks = Array.isArray(primaryComponent?.checks) ? primaryComponent.checks.flatMap((detail) => {
       const age = now - timestamp(detail.checkedAt);
@@ -128,7 +129,8 @@ export function createSnapshot({ observations, primary, previous, now = Date.now
     const externalChecks = check ? [{ checks: check.checks, checkedAt: check.checkedAt }] : [];
     const details = expandDetails(descriptors, [...primaryChecks, ...externalChecks]);
     return { id, name, group, description, descriptionEn, ...(url && { url }), status, checkedAt, days,
-      uptime: inheritCurrent ? primaryComponent.uptime : uptime, checks: details };
+      uptime: inheritCurrent ? primaryComponent.uptime : uptime, checks: details,
+      reopenAt: reopeningDeadline(status, details, windows) };
   });
   return { generatedAt: iso(now), staleAfterMinutes, components, incidents, maintenance, mirrorHistory: history };
 }

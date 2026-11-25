@@ -184,6 +184,34 @@ function diagnosticList(checks) {
   return section;
 }
 
+function updateCountdown(countdown, now) {
+  const seconds = Math.max(0, Math.ceil((Number(countdown.dataset.reopenAt) - now) / 1000));
+  const caption = countdown.querySelector(".reopening-caption");
+  const value = countdown.querySelector(".reopening-value");
+  caption.hidden = seconds === 0;
+  if (!seconds) {
+    value.textContent = t("reopenAwaitingConfirmation");
+    return;
+  }
+  const days = Math.floor(seconds / 86400);
+  const time = [Math.floor(seconds / 3600) % 24, Math.floor(seconds / 60) % 60, seconds % 60]
+    .map((part) => String(part).padStart(2, "0")).join(":");
+  value.textContent = days ? `${plural("dayCount", days)} ${time}` : time;
+}
+
+function reopeningCountdown(reopenAt, label = "reopenIn") {
+  const countdown = element("span", "reopening-countdown");
+  if (!Number.isSafeInteger(reopenAt) || reopenAt <= 0 || reopenAt > 8_640_000_000_000_000) {
+    countdown.textContent = t("reopenNotAnnounced");
+    return countdown;
+  }
+  countdown.dataset.reopenAt = String(reopenAt);
+  countdown.title = formatTime(new Date(reopenAt).toISOString());
+  countdown.append(element("span", "reopening-caption", t(label)), element("strong", "reopening-value"));
+  updateCountdown(countdown, Date.now());
+  return countdown;
+}
+
 function serviceRow(service) {
   const row = element("article", "service");
   row.id = `service-${service.id}`;
@@ -210,7 +238,10 @@ function serviceRow(service) {
   };
   toggle.addEventListener("click", () => showHistory(content.hidden));
   showHistory(wasOpen);
-  headline.append(label, pill(service.status), toggle);
+  const serviceStatus = element("div", "service-status");
+  serviceStatus.append(pill(service.status));
+  if (service.status === "maintenance") serviceStatus.append(reopeningCountdown(service.reopenAt));
+  headline.append(label, serviceStatus, toggle);
   row.append(headline);
 
   const description = language === "en" ? service.descriptionEn : service.description;
@@ -347,7 +378,9 @@ function renderMaintenance(windows, names, current, now) {
     const body = element("div", "event-body");
     addAffected(body, item.components, names);
     if (item.body) body.append(element("p", "detail-copy", item.body));
-    card.append(heading, window, body);
+    card.append(heading, window);
+    if (underway) card.append(reopeningCountdown(dateMs(item.endsAt)));
+    card.append(body);
     list.append(card);
   }
   const previous = current ? [] : [empty(t("savedMaintenance"))];
@@ -391,7 +424,7 @@ function renderBoard(services) {
   statusLegend.replaceChildren(...legend);
 }
 
-function renderOverview(services, state, previous, fromMirror) {
+function renderOverview(services, state, previous, fromMirror, now) {
   const title = t(`overview.${state}.title`);
   get("overview").dataset.state = state;
   get("overall-mark").textContent = overviewMarks[state];
@@ -402,6 +435,13 @@ function renderOverview(services, state, previous, fromMirror) {
   else if (state === "unknown" && services.some((service) => service.status === "operational")) detail = t("partialUnknown");
   else if (state === "operational" && fromMirror) detail = t("overallOperationalMirror");
   get("overall-message").textContent = detail;
+  const maintained = services.filter(({ status }) => status === "maintenance");
+  const reopening = get("overview-reopening");
+  reopening.hidden = !maintained.length;
+  const deadlines = maintained.map(({ reopenAt }) => reopenAt).filter(Number.isSafeInteger);
+  const upcoming = deadlines.filter((deadline) => deadline > now);
+  const next = upcoming.length ? Math.min(...upcoming) : deadlines.length ? Math.max(...deadlines) : null;
+  reopening.replaceChildren(...(maintained.length ? [reopeningCountdown(next, "nextReopenIn")] : []));
 
   const lastChecked = get("last-checked");
   const timestamps = services.map((service) => service.checkedAt).filter((value) => Number.isFinite(dateMs(value)));
@@ -426,9 +466,7 @@ function render(snapshot, previous = "") {
   const maxAge = maxAgeOf(data);
   const incidents = listed(data?.incidents);
   const maintenance = plannedMaintenance(listed(data?.maintenance), now);
-  const currentlyMaintained = new Set(maintenance
-    .filter((item) => dateMs(item.startsAt) <= now)
-    .flatMap((item) => Array.isArray(item.components) ? item.components : []));
+  const activeWindows = maintenance.filter((item) => dateMs(item.startsAt) <= now);
   const currentlyAffected = new Set(incidents
     .filter((item) => ["investigating", "identified", "monitoring"].includes(item.status))
     .flatMap((item) => Array.isArray(item.components) ? item.components : []));
@@ -436,20 +474,23 @@ function render(snapshot, previous = "") {
     .filter(({ id, name }) => typeof id === "string" && typeof name === "string")
     .map((item) => {
       let status = "unknown";
-      if (current && currentlyMaintained.has(item.id)) status = "maintenance";
+      const active = activeWindows.filter((window) => Array.isArray(window.components) && window.components.includes(item.id));
+      if (current && active.length) status = "maintenance";
       else if (current && fresh(item.checkedAt, maxAge, now)) status = rowStatus(item.status);
       if (current && currentlyAffected.has(item.id) && (status === "operational" || status === "unknown")) status = "degraded";
       const checks = listed(item.checks).map((check) => {
         if (current && fresh(check.checkedAt, maxAge, now)) return check;
         return { ...check, status: "unknown", reason: check.reason === "not_configured" ? check.reason : "not_checked", httpStatus: undefined };
       });
-      return { ...item, status, checks };
+      const reopenAt = item.status === "maintenance" ? item.reopenAt
+        : active.length ? Math.max(...active.map((window) => dateMs(window.endsAt))) : null;
+      return { ...item, status, checks, reopenAt };
     });
   const states = new Set(services.map(({ status }) => status));
   const overall = ["outage", "degraded", "maintenance", "unknown", "operational"]
     .find((state) => states.has(state)) || "unknown";
   const names = new Map(services.map((service) => [service.id, service.name]));
-  renderOverview(services, overall, previous, snapshot?.source === "mirror");
+  renderOverview(services, overall, previous, snapshot?.source === "mirror", now);
   renderServices(services);
   renderIncidents(incidents, names, current);
   renderMaintenance(maintenance, names, current, now);
@@ -515,4 +556,9 @@ document.addEventListener("visibilitychange", () => {
 window.setInterval(() => {
   if (!document.hidden) refreshStatus();
 }, 60000);
+window.setInterval(() => {
+  if (document.hidden) return;
+  const now = Date.now();
+  for (const countdown of document.querySelectorAll("[data-reopen-at]")) updateCountdown(countdown, now);
+}, 1000);
 refreshStatus();

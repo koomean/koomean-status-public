@@ -1,4 +1,5 @@
 import { checksFor, services } from './services.mjs';
+import { validReopenAt } from './check-details.mjs';
 
 const timeoutMs = 7_000;
 const slowAfterMs = 2_500;
@@ -46,17 +47,19 @@ async function inspectResponse(response, check) {
     try {
       const message = JSON.parse(body);
       if (message?.error === 'maintenance' && message?.maintenance?.active === true) {
-        return { status: 'maintenance', detail: 'upstream_maintenance' };
+        return { status: 'maintenance', detail: 'upstream_maintenance', reopenAt: validReopenAt(message.maintenance.reopenAt) };
       }
     } catch {
       // Invalid error bodies still represent an unsuccessful HTTP response.
     }
   }
   if ((check.title || check.maintenanceTitle) && /^text\/html\b/i.test(contentType)) {
-    const body = await readBody(response, { limit: 65_536, stopAtTitle: true });
+    const isMaintenanceResponse = response.status === 503 && Boolean(check.maintenanceTitle);
+    const body = await readBody(response, { limit: isMaintenanceResponse ? 16_384 : 65_536, stopAtTitle: !isMaintenanceResponse });
     const title = body.match(/<title(?:\s[^>]*)?>([^<]*)<\/title\s*>/i)?.[1]?.trim();
-    if (title && response.status === 503 && check.maintenanceTitle?.test(title)) {
-      return { status: 'maintenance', detail: 'upstream_maintenance' };
+    if (title && isMaintenanceResponse && check.maintenanceTitle.test(title)) {
+      const until = body.match(/<body\b[^>]*\bdata-until=["'](\d{10,16})["']/i)?.[1];
+      return { status: 'maintenance', detail: 'upstream_maintenance', reopenAt: validReopenAt(Number(until)) };
     }
     if (title && response.ok && check.title?.test(title)) return null;
   }
@@ -156,8 +159,8 @@ export async function runChecks({ fetcher = fetch, env = {}, external = false } 
       latencyMs: latencies.length ? Math.max(...latencies) : null,
       detail,
       checks: checks.map((check) => {
-        const { status, detail, httpStatus } = observations.get(check);
-        return { id: check.id, status, reason: detail, ...(httpStatus && { httpStatus }) };
+        const { status, detail, httpStatus, reopenAt } = observations.get(check);
+        return { id: check.id, status, reason: detail, ...(httpStatus && { httpStatus }), ...(reopenAt && { reopenAt }) };
       }),
     };
   });
